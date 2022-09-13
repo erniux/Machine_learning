@@ -1,0 +1,202 @@
+---
+title: "Project Machine Learning"
+author: Erna Tercero
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Project goal
+In this project will use data from accelerometers on the belt, forearm, arm and dumbell of 6 participants.  
+They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+The goal of the project is **to predict the manner in which they did the exercise.** 
+This is the "classe" variable in the data set: A - E  
+* exactly according to the specification (Class A), 
+* throwing the elbows to the front (Class B), 
+* lifting the dumbbell only halfway (Class C), 
+* lowering the dumbbell only halfway (Class D) 
+* throwing the hips to the front (Class E).
+
+## Project report
+This report describes how I built the model, how I used cross validation, 
+what I think the expected out of sample error is, and why I made the choices I did. 
+
+The process for prediction is: population -> probability and sampling to pick set of data ->
+split into training and validation sets -> build prediction models -> evaluate and decide for one model -> predict outcome using the test set
+
+# 1. Pick set of data
+The sample data sets are stored in two files. Read all the files into appropriate data frames:
+```{r}
+
+
+wleTrain <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+wleTest <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+the training set has 19622 obs. (rows) of 160 variables (columns)  
+the testing set has 20 obs (rows)
+
+This is not really necessary but I like to rename the first column from "X" to a meaningful name:
+```{r}
+colnames(wleTrain)[1] <- "ID"  
+```
+
+# 2. do some exploratory data analyses = look for outliers, skewness, imbalances in outcome/predictors
+```{r eval=FALSE}
+summary(wleTrain)
+library(ggplot2)
+qplot(user_name, classe, data=wleTrain)
+```
+
+# 3. features extraction
+We need to identify the **useful predictors** among the 160 variables, depending on the question we want to answer:
+predict the manner the exercise has been performed.  
+Since the original test set is always available in the files, I will just drop columns from the data frames;
+both training and testing of course, they need to have the same structure.
+
+First of all, it's clear from the summary above that the first six variables have no use:
+```{r}
+library(caret)
+wleTrain <- wleTrain[,7:length(colnames(wleTrain))]
+wleTest  <- wleTest[,7:length(colnames(wleTest))]
+```
+
+Then, let's drop variables which **have a variance near zero** meaining they don't provide enough value for predictions:
+
+```{r}
+nzv <- nearZeroVar(wleTrain, saveMetrics=TRUE) # index of variables with near zero variance
+   # throw out all vars with nzv = TRUE
+nzvTrue <- subset(nzv, nzv == "TRUE")
+wleTrain <- wleTrain[!(names(wleTrain) %in% rownames(nzvTrue))]
+wleTest  <- wleTest[!(names(wleTest) %in% rownames(nzvTrue))]
+```
+
+From the summary above, some variables have missing values (NA).  
+We could substitute them with the average for
+that variable but there are many missing values and this is not improving the model accuracy (I tried).  
+Instead of less-accurate imputation of missing data, I just **remove all predictors with NA values.**
+Hard but fair ...
+
+```{r}
+wleTrain <- wleTrain[, colSums(is.na(wleTrain)) == 0]
+wleTest  <- wleTest[, colSums(is.na(wleTest)) == 0]
+```
+
+Finally, with less predictors we can have a look at the correlations among them:
+```{r}
+corMatrix <- cor(wleTrain[sapply(wleTrain, is.numeric)])
+library(corrplot)
+corrplot(corMatrix, order="AOE", method="color", tl.cex=0.6)
+```
+
+It looks like there are several correlated predictors; I will **remove the ones with high correlation**:
+```{r}
+highCorrelation <- findCorrelation(corMatrix, cutoff = .7, verbose = FALSE) # 22 predictors found
+wleTest  <- wleTest[,-highCorrelation]
+wleTrain <- wleTrain[,-highCorrelation]
+```
+
+# 4. split the training set to have a validation set for all the candidate models (cross-validation)
+For each model I will measure the out of sample error that is **the error rate you get on a new data set**.  
+The purpose of using a different data set than training is model checking. I want **to validate how well the model got trained**. 
+I will calculate the out of sample error by looking at the *accuracy*.  
+Cross validation is useful for this because if you train using all the data you have, you have none left for this validation and out of sample error measurement. 
+Remember that the test set has to be used as a rating on the final model and that it misses the classe variable so it cannot be used for validation. For this, I extract 20% of the training data:
+
+```{r}
+inTrainIndex <- createDataPartition(wleTrain$classe, p=0.8, list=FALSE)
+training   <- wleTrain[inTrainIndex,]  # 80% is for training
+validation <- wleTrain[-inTrainIndex,] # 20% is for validation out of sample
+```
+
+You could do this once, as above, but what if the 20% you happened to pick to test happens to contain a bunch of points that are particularly easy (or particularly hard) to predict? We will not have come up with the best estimate possible of the models ability to learn and predict.
+
+We want to use all of the data. So to continue the above example of an 80/20 split, I would do 5-fold cross validation by training the model 5 times on 80% of the data and testing on 20%. This ensure that each data point ends up in the 20% test set exactly once. 
+
+Larger number of folds means less bias but also more variance.
+```{r}
+cvControl <- trainControl(method="cv", repeats=5)
+```
+
+# 5. train all competing models on the training data set using the CV folds method
+
+## Baseline for comparing accuracy
+The baseline is simply deciding randomly the classe category based on the frequency on the training set (classe A is 28% of the times, classe B is 19% and so on ...)  
+The baseline accuracy is 0.2
+```{r}
+baseline <- summary(wleTrain$classe)
+baseline
+```
+
+**This is a classification problem**, the output to be predicted - classe - is a 5-categories variable.  
+We skip the regression model.
+
+## Why not linear regression?
+Linear regression is not appropriate in the case of a qualitative response.  
+We could consider encoding these categories as a quantitative response variable Y by setting classeA = 1, classe B = 2, and so on.
+Using this coding, least squares could be used to fit a linear regression model to predict Y.   Unfortunately, this coding implies an ordering on the outcomes, putting classe B in between A and C, and insisting that the difference between A and B is the same as the difference between B and C. Changing the order will produce a different model and different outcomes.
+
+Logistic regression works for qualitative variables but when the output variable has more than two categories
+we need a different model: LDA.
+
+## 5.1. LDA (Linear Discriminant Analysis)
+
+```{r}
+modelLR <- train(classe ~ ., method="lda", trControl=cvControl, data=training)
+predictions = predict(modelLR, newdata = validation)
+confusion <- table(validation$classe, predictions)
+accuracy1 <- sum(diag(confusion)) / nrow(validation)
+accuracy1
+```
+Accuracy is 0.58 (58% of the times is right) that is better than baseline.  
+But LDA can also be used to reduce dimensions (like PCA but preserve the class discriminatory information).  
+In this case it returns *four Linear Discriminants* (instead of  the initial 30 predictors)
+
+## 5.2 decision tree model
+Let's train the model on all predictors using a tree and cross-validation:
+```{r}
+modTree <- train(classe ~ ., method="rpart", trControl = cvControl, data= training)
+print(modTree$finalModel)
+```
+Trees are easy to interpret; the trained model uses this 6 predictors:  
+*roll_dumbbell, pitch_forearm, magnet_belt_z, roll_forearm, total_accel_dumbbell and gyros_belt_z*
+
+```{r}
+library(rpart.plot); prp(modTree$finalModel)
+```
+
+Now let's validate the model on the validation data and calculate the accuracy:
+
+```{r}
+predictions = predict(modTree, newdata = validation)
+confusion <- table(validation$classe, predictions)
+accuracy2 <- sum(diag(confusion)) / nrow(validation)  
+accuracy2
+```
+Accuracy is 0.50 (50% of the times is right) that is worse than LDA but more interpretable.
+
+# 5.3  boosting
+The basic idea of boosting is to take a lot of predictors, weight them and add them up, in this way getting a stronger predictor:
+```{r eval=FALSE}
+modelGBM <- train(classe ~ ., data=training, method="gbm", trControl = cvControl, verbose=FALSE)
+summary(modelGBM)
+predictions = predict(modelGBM, newdata = validation)
+confusion <- table(validation$classe, predictions)
+accuracy3 <- sum(diag(confusion)) / nrow(validation)
+accuracy3
+```
+Accuracy is 0.91, much higher
+
+# 5.4 random forest (= many trees :)
+
+```{r eval=FALSE}
+modelRF <- train(classe ~ ., data=training, method="rf", trControl = cvControl, ntree=250)
+summary(modelRF)
+predictions = predict(modelRF, newdata = validation)
+confusion <- table(validation$classe, predictions)
+accuracy4 <- sum(diag(confusion)) / nrow(validation)
+accuracy4
+```
+
+Accuracy is now an astounding 0.99 !
+
+**The best model seems to be the Random Forest.**
