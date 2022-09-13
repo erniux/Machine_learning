@@ -6,20 +6,20 @@ output: html_document
 ---
 
 # Project goal
-In this project will use data from accelerometers on the belt, forearm, arm and dumbell of 6 participants.  
-They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
 
-The goal of the project is **to predict the manner in which they did the exercise.** 
-This is the "classe" variable in the data set: A - E  
-* exactly according to the specification (Class A), 
-* throwing the elbows to the front (Class B), 
-* lifting the dumbbell only halfway (Class C), 
-* lowering the dumbbell only halfway (Class D) 
-* throwing the hips to the front (Class E).
+This is the "classe" variable in the data set: 
+* Class A - Exactly according to the specification.
+* Class B - Throwing the elbows to the front.
+* Class C - Lifting the dumbbell only halfway.
+* Class D - Lowering the dumbbell only halfway.
+* Class E - Throwing the hips to the front.
 
 ## Project report
-This report describes how I built the model, how I used cross validation, 
-what I think the expected out of sample error is, and why I made the choices I did. 
+This report describes:
+How the model was built.
+How cross validation was used.
+The expected out of sample error is, and justify the choices maden.
 
 The process for prediction is: population -> probability and sampling to pick set of data ->
 split into training and validation sets -> build prediction models -> evaluate and decide for one model -> predict outcome using the test set
@@ -35,7 +35,7 @@ wleTest <- read.csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-test
 the training set has 19622 obs. (rows) of 160 variables (columns)  
 the testing set has 20 obs (rows)
 
-This is not really necessary but I like to rename the first column from "X" to a meaningful name:
+renaming column name to "ID":
 ```{r}
 colnames(wleTrain)[1] <- "ID"  
 ```
@@ -88,7 +88,7 @@ library(corrplot)
 corrplot(corMatrix, order="AOE", method="color", tl.cex=0.6)
 ```
 
-It looks like there are several correlated predictors; I will **remove the ones with high correlation**:
+It looks like there are several correlated predictors;  **remove predictors with high correlation**:
 ```{r}
 highCorrelation <- findCorrelation(corMatrix, cutoff = .7, verbose = FALSE) # 22 predictors found
 wleTest  <- wleTest[,-highCorrelation]
@@ -199,4 +199,5 @@ accuracy4
 
 Accuracy is now an astounding 0.99 !
 
-**The best model seems to be the Random Forest.**
+
+## **The best model seems to be the Random Forest.**
